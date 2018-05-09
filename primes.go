@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
 
 var numThreads = 8
-var numPrimes = 100000000
+var numPrimes = 1000000000
 
 type numberLock struct {
 	value *int
@@ -34,6 +35,7 @@ func main() {
 	goroutinesSame := true
 	for i := 0; i < numPrimes; i++ {
 		if !(sTPrimes[i] == iPPrimes[i]) {
+			fmt.Printf("%v %v %v\n", i, sTPrimes[i], iPPrimes[i])
 			iPSame = false
 		}
 		if !(sTPrimes[i] == channelsPrimes[i]) {
@@ -47,12 +49,6 @@ func main() {
 		}
 	}
 	fmt.Printf("iP same: %v\nchannels same: %v\nlocking same: %v\ngoroutines same: %v\n", iPSame, channelsSame, lockingSame, goroutinesSame)
-
-	// for i := range primes {
-	// 	if primes[i] == false {
-	// 		fmt.Println(i)
-	// 	}
-	// }
 }
 
 func makePrimeArray() *[]bool {
@@ -232,7 +228,7 @@ func multithreadInnerParallel() (time.Duration, []bool) {
 	primes := makePrimeArray()
 	curNum := 2
 	for curNum != -1 {
-		sieveParallel(curNum, primes)
+		sieveParallel(curNum, primes, 1000)
 		curNum = nextNum(curNum, *primes)
 	}
 	return time.Since(start), *primes
@@ -293,21 +289,23 @@ func sievehelper(curNum int, primes *[]bool) {
 	}
 }
 
-func sieveParallel(curNum int, primes *[]bool) {
-	curNum = curNum + curNum
-	totalNumbers := numPrimes - curNum
+func sieveParallel(curNum int, primes *[]bool, tasksPerThread int) {
+	totalNumbers := numPrimes - 1 - curNum
 	numbersToCheckOff := int(totalNumbers / curNum)
-	if numbersToCheckOff < numThreads {
+	if numbersToCheckOff < tasksPerThread {
 		sievehelper(curNum, primes)
 	} else {
-		howManyPerThread := (numbersToCheckOff / numThreads)
-		step := howManyPerThread * curNum
-		channels := make([]chan bool, numThreads)
-		for i := 0; i < numThreads; i++ {
-			start := curNum + (i * step)
-			end := curNum + ((i + 1) * step)
+		numberOfThreads := int(math.Ceil(float64(numbersToCheckOff) / float64(tasksPerThread)))
+		step := tasksPerThread * curNum
+		channels := make([]chan bool, numberOfThreads)
+		for i := range channels {
+			start := (step * i) + curNum + curNum
+			end := (step * (i + 1)) + curNum
+			if i == len(channels)-1 && numbersToCheckOff%tasksPerThread != 0 {
+				end -= ((tasksPerThread - (numbersToCheckOff % tasksPerThread)) * curNum)
+			}
 			channels[i] = make(chan bool)
-			go sievehelperParallel(channels[i], start, end, primes)
+			go sievehelperParallel(channels[i], curNum, start, end, primes)
 		}
 		for _, ch := range channels {
 			<-ch
@@ -315,8 +313,8 @@ func sieveParallel(curNum int, primes *[]bool) {
 	}
 }
 
-func sievehelperParallel(ch chan bool, start int, end int, primes *[]bool) {
-	for i := start; i < end; i += start {
+func sievehelperParallel(ch chan bool, curNum int, start int, end int, primes *[]bool) {
+	for i := start; i <= end; i += curNum {
 		(*primes)[i] = true
 	}
 	ch <- true
