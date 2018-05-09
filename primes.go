@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-var numThreads = 10
-var numPrimes = 500000000
+var numThreads = 8
+var numPrimes = 100000000
 
 type numberLock struct {
 	value *int
@@ -19,20 +19,34 @@ func main() {
 
 	sTTime, sTPrimes := singlethread()
 	fmt.Printf("Single thread: %v\n", sTTime)
+	iPTime, iPPrimes := multithreadInnerParallel()
+	fmt.Printf("Multi thread Inner Parallel: %v\n", iPTime)
 	channelsTime, channelsPrimes := multithreadChannels()
 	fmt.Printf("Multi thread channels: %v\n", channelsTime)
 	lockingTime, lockingPrimes := multithreadLocking()
 	fmt.Printf("Multi thread locking: %v\n", lockingTime)
 	goroutinesTime, goroutinesPrimes := multithreadGoRoutines()
 	fmt.Printf("Multi thread goroutines: %v\n", goroutinesTime)
-	allSame := true
-	for i := numPrimes; i < numPrimes; i++ {
-		if !(sTPrimes[i] == channelsPrimes[i] == lockingPrimes[i] == goroutinesPrimes[i]) {
-			allSame = false
-			break
+
+	iPSame := true
+	channelsSame := true
+	lockingSame := true
+	goroutinesSame := true
+	for i := 0; i < numPrimes; i++ {
+		if !(sTPrimes[i] == iPPrimes[i]) {
+			iPSame = false
+		}
+		if !(sTPrimes[i] == channelsPrimes[i]) {
+			channelsSame = false
+		}
+		if !(sTPrimes[i] == lockingPrimes[i]) {
+			lockingSame = false
+		}
+		if !(sTPrimes[i] == goroutinesPrimes[i]) {
+			goroutinesSame = false
 		}
 	}
-	fmt.Printf("All same: %v\n", allSame)
+	fmt.Printf("iP same: %v\nchannels same: %v\nlocking same: %v\ngoroutines same: %v\n", iPSame, channelsSame, lockingSame, goroutinesSame)
 
 	// for i := range primes {
 	// 	if primes[i] == false {
@@ -213,6 +227,17 @@ func multithreadGoRoutines() (time.Duration, []bool) {
 	return time.Since(start), *primes
 }
 
+func multithreadInnerParallel() (time.Duration, []bool) {
+	start := time.Now()
+	primes := makePrimeArray()
+	curNum := 2
+	for curNum != -1 {
+		sieveParallel(curNum, primes)
+		curNum = nextNum(curNum, *primes)
+	}
+	return time.Since(start), *primes
+}
+
 func nextNum(curNum int, primes []bool) int {
 	if curNum == -1 {
 		return -1
@@ -223,7 +248,7 @@ func nextNum(curNum int, primes []bool) int {
 	} else {
 		i = curNum + 2
 	}
-	for ; i < len(primes)/2; i += 2 {
+	for ; i <= numPrimes/2; i += 2 {
 		if !primes[i] {
 			return i
 		}
@@ -263,7 +288,36 @@ func goRoutinesSieve(done chan bool, number int, primes *[]bool) {
 }
 
 func sievehelper(curNum int, primes *[]bool) {
-	for i := curNum + curNum; i < len(*primes); i += curNum {
+	for i := curNum + curNum; i < numPrimes; i += curNum {
 		(*primes)[i] = true
 	}
+}
+
+func sieveParallel(curNum int, primes *[]bool) {
+	curNum = curNum + curNum
+	totalNumbers := numPrimes - curNum
+	numbersToCheckOff := int(totalNumbers / curNum)
+	if numbersToCheckOff < numThreads {
+		sievehelper(curNum, primes)
+	} else {
+		howManyPerThread := (numbersToCheckOff / numThreads)
+		step := howManyPerThread * curNum
+		channels := make([]chan bool, numThreads)
+		for i := 0; i < numThreads; i++ {
+			start := curNum + (i * step)
+			end := curNum + ((i + 1) * step)
+			channels[i] = make(chan bool)
+			go sievehelperParallel(channels[i], start, end, primes)
+		}
+		for _, ch := range channels {
+			<-ch
+		}
+	}
+}
+
+func sievehelperParallel(ch chan bool, start int, end int, primes *[]bool) {
+	for i := start; i < end; i += start {
+		(*primes)[i] = true
+	}
+	ch <- true
 }
